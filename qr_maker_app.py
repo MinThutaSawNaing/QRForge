@@ -10,7 +10,7 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
 import qrcode
 from PIL import Image
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect
 from PyQt6.QtGui import (
     QColor,
     QGuiApplication,
@@ -24,7 +24,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QDialog,
@@ -51,11 +50,9 @@ if cv2 is not None:
             cv2.setLogLevel(2)
 
 
-WINDOW_MIN_WIDTH = 980
-WINDOW_MIN_HEIGHT = 640
+WINDOW_MIN_WIDTH = 860
+WINDOW_MIN_HEIGHT = 560
 QR_IMAGE_SIZE = 360
-QR_PREVIEW_PIXMAP_SIZE = 320
-DEMO_LOGO_SIZE = 72
 BASE_DIR = Path(__file__).resolve().parent
 LOGO_PNG_PATH = BASE_DIR / "logo.png"
 LOGO_ICO_PATH = BASE_DIR / "logo.ico"
@@ -120,14 +117,58 @@ def _build_demo_brand_pixmap(size: int) -> QPixmap:
     return pixmap
 
 
-class QRPreview(QLabel):
+class QRPreview(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumSize(200, 200)
+        self._pixmap: QPixmap | None = None
+        self._placeholder = "Your QR code will appear here"
+        self.setMinimumSize(160, 160)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setScaledContents(False)
         self.setObjectName("qrPreview")
+
+    def set_preview_pixmap(self, pixmap: QPixmap | None) -> None:
+        self._pixmap = pixmap
+        self.update()
+
+    def clear_preview(self) -> None:
+        self._pixmap = None
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        frame_rect = self.rect().adjusted(12, 12, -12, -12)
+        painter.setPen(QPen(QColor("#e5edf5"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(frame_rect, 18, 18)
+
+        inner_margin = max(18, min(frame_rect.width(), frame_rect.height()) // 12)
+        target_rect = frame_rect.adjusted(inner_margin, inner_margin, -inner_margin, -inner_margin)
+        side = min(target_rect.width(), target_rect.height())
+        square_rect = QRect(
+            target_rect.center().x() - side // 2,
+            target_rect.center().y() - side // 2,
+            side,
+            side,
+        )
+
+        if self._pixmap is None:
+            painter.setPen(QColor("#6f8299"))
+            painter.drawText(square_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self._placeholder)
+            return
+
+        scaled = self._pixmap.scaled(
+            square_rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = square_rect.x() + (square_rect.width() - scaled.width()) // 2
+        y = square_rect.y() + (square_rect.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
 
 
 class CameraScanDialog(QDialog):
@@ -253,9 +294,6 @@ class QRMakerWindow(QMainWindow):
 
         self.text_input = QTextEdit()
         self.preview_label = QRPreview()
-        self.preview_hint = QLabel("Your QR code will appear here")
-        self.preview_hint.setObjectName("previewHint")
-        self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label = QLabel("Type or paste text to generate a QR code.")
         self.status_label.setWordWrap(True)
         self.status_label.setObjectName("statusLabel")
@@ -267,7 +305,6 @@ class QRMakerWindow(QMainWindow):
         self.scan_result_input.setObjectName("scanResultInput")
         self.scan_result_input.setReadOnly(True)
         self.scan_result_input.setPlaceholderText("Camera or image scan results will appear here.")
-        self.scan_result_input.setMinimumHeight(220)
 
         self.generate_button = QPushButton("Generate QR")
         self.clear_button = QPushButton("Clear")
@@ -293,25 +330,26 @@ class QRMakerWindow(QMainWindow):
         self.setCentralWidget(central)
 
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(28, 28, 28, 28)
-        root_layout.setSpacing(20)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setSpacing(12)
 
         header_card = QFrame()
         header_card.setObjectName("headerCard")
         header_layout = QHBoxLayout(header_card)
-        header_layout.setContentsMargins(24, 24, 24, 24)
-        header_layout.setSpacing(18)
+        header_layout.setContentsMargins(18, 14, 18, 14)
+        header_layout.setSpacing(14)
 
         logo_label = QLabel()
         logo_label.setObjectName("logoBadge")
-        logo_label.setPixmap(create_brand_pixmap(DEMO_LOGO_SIZE))
-        logo_label.setFixedSize(DEMO_LOGO_SIZE, DEMO_LOGO_SIZE)
+        logo_pixmap_size = 48
+        logo_label.setPixmap(create_brand_pixmap(logo_pixmap_size))
+        logo_label.setFixedSize(logo_pixmap_size, logo_pixmap_size)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         heading_block = QWidget()
         heading_layout = QVBoxLayout(heading_block)
         heading_layout.setContentsMargins(0, 0, 0, 0)
-        heading_layout.setSpacing(8)
+        heading_layout.setSpacing(2)
 
         title = QLabel("QRForge")
         title.setObjectName("title")
@@ -322,21 +360,22 @@ class QRMakerWindow(QMainWindow):
         heading_layout.addWidget(title)
         heading_layout.addWidget(subtitle)
 
-        header_layout.addWidget(logo_label, 0, Qt.AlignmentFlag.AlignTop)
+        header_layout.addWidget(logo_label, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(heading_block, 1, Qt.AlignmentFlag.AlignVCenter)
 
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(20)
+        content_layout.setSpacing(12)
 
         nav_card = QFrame()
         nav_card.setObjectName("navCard")
+        nav_card.setFixedWidth(200)
         nav_layout = QVBoxLayout(nav_card)
-        nav_layout.setContentsMargins(18, 18, 18, 18)
-        nav_layout.setSpacing(12)
+        nav_layout.setContentsMargins(14, 14, 14, 14)
+        nav_layout.setSpacing(10)
 
         nav_title = QLabel("Workspace")
         nav_title.setObjectName("navTitle")
-        nav_hint = QLabel("Move between creation and scanning without leaving the app.")
+        nav_hint = QLabel("Switch between creation and scanning.")
         nav_hint.setObjectName("navHint")
         nav_hint.setWordWrap(True)
 
@@ -347,7 +386,7 @@ class QRMakerWindow(QMainWindow):
 
         nav_layout.addWidget(nav_title)
         nav_layout.addWidget(nav_hint)
-        nav_layout.addSpacing(10)
+        nav_layout.addSpacing(6)
         nav_layout.addWidget(self.create_nav_button)
         nav_layout.addWidget(self.scan_nav_button)
         nav_layout.addStretch(1)
@@ -356,8 +395,8 @@ class QRMakerWindow(QMainWindow):
         self.page_stack.addWidget(self._build_create_page())
         self.page_stack.addWidget(self._build_scan_page())
 
-        content_layout.addWidget(nav_card, 3)
-        content_layout.addWidget(self.page_stack, 9)
+        content_layout.addWidget(nav_card)
+        content_layout.addWidget(self.page_stack, 1)
 
         root_layout.addWidget(header_card)
         root_layout.addLayout(content_layout, 1)
@@ -366,13 +405,14 @@ class QRMakerWindow(QMainWindow):
         page = QWidget()
         page_layout = QHBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(20)
+        page_layout.setSpacing(12)
 
+        # --- Editor panel (scrollable) ---
         editor_card = QFrame()
         editor_card.setObjectName("panel")
         editor_layout = QVBoxLayout(editor_card)
-        editor_layout.setContentsMargins(22, 22, 22, 22)
-        editor_layout.setSpacing(14)
+        editor_layout.setContentsMargins(18, 18, 18, 18)
+        editor_layout.setSpacing(10)
 
         editor_title = QLabel("Create From Text")
         editor_title.setObjectName("sectionTitle")
@@ -385,15 +425,15 @@ class QRMakerWindow(QMainWindow):
         )
         self.text_input.setAcceptRichText(False)
         self.text_input.setObjectName("textInput")
-        self.text_input.setMinimumHeight(300)
+        self.text_input.setMinimumHeight(100)
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 4, 0, 0)
         button_row.setSpacing(10)
         self.generate_button.setObjectName("primaryButton")
         self.clear_button.setObjectName("secondaryButton")
-        self.generate_button.setMinimumWidth(150)
-        self.clear_button.setMinimumWidth(110)
+        self.generate_button.setMinimumWidth(130)
+        self.clear_button.setMinimumWidth(100)
         button_row.addStretch(1)
         button_row.addWidget(self.generate_button)
         button_row.addWidget(self.clear_button)
@@ -405,25 +445,26 @@ class QRMakerWindow(QMainWindow):
         editor_layout.addLayout(button_row)
         editor_layout.addWidget(self.status_label)
 
+        # --- Preview panel ---
         preview_card = QFrame()
         preview_card.setObjectName("panel")
         preview_layout = QVBoxLayout(preview_card)
-        preview_layout.setContentsMargins(22, 22, 22, 22)
-        preview_layout.setSpacing(14)
+        preview_layout.setContentsMargins(18, 18, 18, 18)
+        preview_layout.setSpacing(10)
 
         preview_title = QLabel("Preview And Export")
         preview_title.setObjectName("sectionTitle")
-        preview_subtitle = QLabel("Review the generated QR before copying it to the clipboard or saving it as a PNG.")
+        preview_subtitle = QLabel("Review the QR code, then copy or save as PNG.")
         preview_subtitle.setObjectName("sectionBody")
         preview_subtitle.setWordWrap(True)
 
         preview_actions = QHBoxLayout()
-        preview_actions.setContentsMargins(0, 18, 0, 0)
+        preview_actions.setContentsMargins(0, 6, 0, 0)
         preview_actions.setSpacing(10)
         self.copy_button.setObjectName("secondaryButton")
         self.save_button.setObjectName("primaryButton")
-        self.copy_button.setMinimumWidth(130)
-        self.save_button.setMinimumWidth(130)
+        self.copy_button.setMinimumWidth(110)
+        self.save_button.setMinimumWidth(110)
         preview_actions.addStretch(1)
         preview_actions.addWidget(self.copy_button)
         preview_actions.addWidget(self.save_button)
@@ -432,46 +473,35 @@ class QRMakerWindow(QMainWindow):
         preview_canvas = QFrame()
         preview_canvas.setObjectName("previewCanvas")
         preview_canvas_layout = QVBoxLayout(preview_canvas)
-        preview_canvas_layout.setContentsMargins(18, 18, 18, 18)
-        preview_canvas_layout.setSpacing(14)
+        preview_canvas_layout.setContentsMargins(10, 10, 10, 10)
+        preview_canvas_layout.setSpacing(8)
 
         preview_meta = QLabel("Live Preview")
         preview_meta.setObjectName("previewMeta")
 
-        preview_shell = QFrame()
-        preview_shell.setObjectName("previewShell")
-        preview_shell_layout = QVBoxLayout(preview_shell)
-        preview_shell_layout.setContentsMargins(18, 18, 18, 18)
-        preview_shell_layout.setSpacing(10)
-        preview_shell_layout.addStretch(1)
-        preview_shell_layout.addWidget(self.preview_label, 0, Qt.AlignmentFlag.AlignCenter)
-        preview_shell_layout.addWidget(self.preview_hint, 0, Qt.AlignmentFlag.AlignCenter)
-        preview_shell_layout.addStretch(1)
-
         preview_canvas_layout.addWidget(preview_meta)
-        preview_canvas_layout.addWidget(preview_shell, 1)
+        preview_canvas_layout.addWidget(self.preview_label, 1)
 
         preview_layout.addWidget(preview_title)
         preview_layout.addWidget(preview_subtitle)
         preview_layout.addWidget(preview_canvas, 1)
         preview_layout.addLayout(preview_actions)
 
-        page_layout.addWidget(editor_card, 11)
-        page_layout.addWidget(preview_card, 9)
+        page_layout.addWidget(editor_card, 5)
+        page_layout.addWidget(preview_card, 5)
         return page
 
     def _build_scan_page(self) -> QWidget:
         page = QWidget()
-        page_layout = QGridLayout(page)
+        page_layout = QHBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setHorizontalSpacing(20)
-        page_layout.setVerticalSpacing(20)
+        page_layout.setSpacing(12)
 
         scan_actions_card = QFrame()
         scan_actions_card.setObjectName("panel")
         scan_actions_layout = QVBoxLayout(scan_actions_card)
-        scan_actions_layout.setContentsMargins(22, 22, 22, 22)
-        scan_actions_layout.setSpacing(14)
+        scan_actions_layout.setContentsMargins(18, 18, 18, 18)
+        scan_actions_layout.setSpacing(10)
 
         scan_title = QLabel("Scan QR Codes")
         scan_title.setObjectName("sectionTitle")
@@ -499,8 +529,10 @@ class QRMakerWindow(QMainWindow):
         result_card = QFrame()
         result_card.setObjectName("panel")
         result_layout = QVBoxLayout(result_card)
-        result_layout.setContentsMargins(22, 22, 22, 22)
-        result_layout.setSpacing(14)
+        result_layout.setContentsMargins(18, 18, 18, 18)
+        result_layout.setSpacing(10)
+
+        self.scan_result_input.setMinimumHeight(80)
 
         result_actions = QHBoxLayout()
         result_actions.setSpacing(10)
@@ -513,10 +545,8 @@ class QRMakerWindow(QMainWindow):
         result_layout.addWidget(self.scan_result_input, 1)
         result_layout.addLayout(result_actions)
 
-        page_layout.addWidget(scan_actions_card, 0, 0)
-        page_layout.addWidget(result_card, 0, 1)
-        page_layout.setColumnStretch(0, 4)
-        page_layout.setColumnStretch(1, 6)
+        page_layout.addWidget(scan_actions_card, 4)
+        page_layout.addWidget(result_card, 6)
         return page
 
     def _wire_events(self) -> None:
@@ -544,63 +574,61 @@ class QRMakerWindow(QMainWindow):
                     stop: 0 #132238,
                     stop: 1 #1f6f78
                 );
-                border-radius: 22px;
+                border-radius: 16px;
             }
             QFrame#panel {
                 background: #ffffff;
                 border: 1px solid #d9e2ec;
-                border-radius: 20px;
+                border-radius: 16px;
             }
             QFrame#navCard {
                 background: #132238;
                 border: 1px solid #1e395a;
-                border-radius: 20px;
+                border-radius: 16px;
             }
             QLabel#title {
                 color: #ffffff;
-                font-size: 30px;
+                font-size: 22px;
                 font-weight: 700;
             }
             QLabel#logoBadge {
                 background: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 20px;
-                padding: 10px;
+                border-radius: 14px;
+                padding: 6px;
             }
             QLabel#subtitle {
                 color: #dce7ef;
-                font-size: 14px;
+                font-size: 13px;
             }
             QLabel#navTitle {
                 color: #ffffff;
-                font-size: 19px;
+                font-size: 17px;
                 font-weight: 700;
             }
             QLabel#navHint {
                 color: #b9c7d6;
-                font-size: 13px;
-                line-height: 1.4em;
+                font-size: 12px;
             }
             QLabel#sectionTitle {
                 color: #132238;
-                font-size: 18px;
+                font-size: 16px;
                 font-weight: 700;
             }
             QLabel#sectionBody {
                 color: #62758a;
                 font-size: 13px;
-                line-height: 1.45em;
             }
             QLabel#statusLabel {
-                min-height: 40px;
+                min-height: 28px;
                 padding-top: 2px;
                 color: #5d7086;
+                font-size: 13px;
             }
             QLabel#creditLabel {
                 color: #d7e2ee;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
-                letter-spacing: 0.3px;
             }
             QLabel#infoLabel {
                 color: #5d7086;
@@ -614,41 +642,27 @@ class QRMakerWindow(QMainWindow):
                     stop: 1 #f9fbfe
                 );
                 border: 1px solid #d6e0ea;
-                border-radius: 20px;
+                border-radius: 14px;
             }
             QLabel#previewMeta {
                 color: #5b6c80;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 700;
                 letter-spacing: 1px;
                 text-transform: uppercase;
-            }
-            QFrame#previewShell {
-                background: #ffffff;
-                border: 1px solid #e1e8f0;
-                border-radius: 18px;
-            }
-            QFrame#previewShell::before {
-                border: none;
             }
             QLabel#qrPreview {
                 background: transparent;
                 border: none;
                 padding: 0;
             }
-            QLabel#previewHint {
-                color: #6f8299;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.6px;
-            }
             QTextEdit#textInput {
                 background: #fbfdff;
                 border: 1px solid #d9e2ec;
-                border-radius: 16px;
+                border-radius: 12px;
                 color: #132238;
-                font-size: 15px;
-                padding: 14px;
+                font-size: 14px;
+                padding: 10px;
                 selection-background-color: #c6eef0;
             }
             QTextEdit#textInput:focus {
@@ -657,15 +671,15 @@ class QRMakerWindow(QMainWindow):
             QTextEdit#scanResultInput {
                 background: #fbfdff;
                 border: 1px solid #d9e2ec;
-                border-radius: 16px;
+                border-radius: 12px;
                 color: #132238;
-                font-size: 15px;
-                padding: 14px;
+                font-size: 14px;
+                padding: 10px;
             }
             QLabel#cameraFeed {
                 background: #0f1724;
                 border: 1px solid #1e293b;
-                border-radius: 16px;
+                border-radius: 12px;
                 color: #d9e2ec;
                 font-size: 14px;
             }
@@ -678,10 +692,10 @@ class QRMakerWindow(QMainWindow):
                 color: #4f5f73;
             }
             QPushButton {
-                min-height: 44px;
-                padding: 0 18px;
-                border-radius: 12px;
-                font-size: 14px;
+                min-height: 38px;
+                padding: 0 16px;
+                border-radius: 10px;
+                font-size: 13px;
                 font-weight: 600;
                 text-align: center;
             }
@@ -702,12 +716,12 @@ class QRMakerWindow(QMainWindow):
                 background: #e5eef6;
             }
             QPushButton#navButton {
-                min-height: 50px;
+                min-height: 42px;
                 background: rgba(255, 255, 255, 0.06);
                 color: #eff6fb;
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 text-align: left;
-                padding-left: 16px;
+                padding-left: 14px;
             }
             QPushButton#navButton:hover {
                 background: rgba(255, 255, 255, 0.12);
@@ -735,8 +749,7 @@ class QRMakerWindow(QMainWindow):
     def _reset_preview(self) -> None:
         self.current_image = None
         self.current_pixmap = None
-        self.preview_label.clear()
-        self.preview_hint.show()
+        self.preview_label.clear_preview()
         self.status_label.setText("Type or paste text to generate a QR code.")
         self._update_action_state()
 
@@ -772,7 +785,6 @@ class QRMakerWindow(QMainWindow):
         self.current_pixmap = self._pil_image_to_pixmap(self.current_image)
 
         self._refresh_preview()
-        self.preview_hint.hide()
         self.status_label.setText(f"QR code ready for {len(text)} character(s).")
         self._update_action_state()
 
@@ -911,38 +923,12 @@ class QRMakerWindow(QMainWindow):
     def _refresh_preview(self) -> None:
         if not self.current_pixmap:
             return
-
-        contents = self.preview_label.contentsRect()
-        if contents.width() <= 0 or contents.height() <= 0:
-            return
-
-        margin = max(16, int(min(contents.width(), contents.height()) * 0.12))
-        available = contents.size() - QSize(margin * 2, margin * 2)
-        if available.width() <= 0 or available.height() <= 0:
-            return
-
-        scaled = self.current_pixmap.scaled(
-            available,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-
-        canvas = QPixmap(contents.size())
-        canvas.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(canvas)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        x = (contents.width() - scaled.width()) // 2
-        y = (contents.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
-        painter.end()
-
-        self.preview_label.setPixmap(canvas)
+        self.preview_label.set_preview_pixmap(self.current_pixmap)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self.current_pixmap:
-            self._refresh_preview()
+            self.preview_label.update()
 
     @staticmethod
     def _pil_image_to_pixmap(image: Image.Image) -> QPixmap:
