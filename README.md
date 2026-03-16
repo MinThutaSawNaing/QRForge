@@ -53,6 +53,15 @@ This creates the packaged app in `dist\QRForge`.
 
 The installer output will be created in the `installer` folder.
 
+## Download For Windows
+
+For non-technical users, the easiest option is the Windows installer:
+
+- Download `installer/QRForge-Setup.exe` from this repository
+- Run the installer
+- Follow the setup steps on screen
+- Launch `QRForge` from the Start menu or desktop shortcut
+
 ## Project Files
 
 - `main.py` starts the Qt application

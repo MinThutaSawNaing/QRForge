@@ -10,4 +10,5 @@ build/
 dist/
 *.spec.bak
 *.log
-installer/
+installer/*
+!installer/QRForge-Setup.exe
